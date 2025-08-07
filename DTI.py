@@ -89,7 +89,7 @@ filtered_participants = participants_table[(participants_table['scan_site_id'] =
 filtered_participants.describe()
 
 # %%
-filtered_participants.head()
+filtered_participants.head(5000)
 
 # %%
 list(hbn_pod2_path.iterdir())
@@ -198,7 +198,7 @@ ordered_df = (
     .apply(lambda x: x)
     .reset_index(drop=True)
 )
-ordered_df.head(150)
+ordered_df.head(5000)
 
 # %%
 import matplotlib.pyplot as plt
@@ -223,54 +223,6 @@ for i, subject in enumerate(first_5_subjects):
 
 plt.tight_layout(rect=[0, 0, 1, 0.96])
 plt.show()
-
-# %%
-
-# %% [markdown]
-# # Building a GLM model
-
-# %%
-
-from sklearn.linear_model import ElasticNetCV
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-import pandas as pd
-import numpy as np
-
-
-for key, df_group in ordered_df:
-    df= df_group.copy()  # copy of just this group's DataFrame
-  
-# 24 tract columns, 'age' column and 'sex' column
-
-# 1. Separate features and target
-x = df.drop(columns=['age'])
-y = df['age']
-
-# 2. Encode 'sex' if it's not already numeric
-x['sex'] = x['sex'].map({'F': 0, 'M': 1})  # or adjust based on actual values
-
-# 3. Split into train/test sets
-x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
-
-# 4. Standardize features
-scaler = StandardScaler()
-x_train_scaled = scaler.fit_transform(x_train)
-x_test_scaled = scaler.transform(x_test)
-
-# 5. Fit Elastic Net with CV
-model = ElasticNetCV(cv=5, l1_ratio=[.1, .5, .7, .9, .95, .99, 1], random_state=78)
-model.fit(x_train_scaled, y_train)
-
-# 6. Evaluate
-print("Best alpha:", model.alpha_)
-print("Best l1_ratio:", model.l1_ratio_)
-print("Train R^2:", model.score(X_train_scaled, y_train))
-print("Test R^2:", model.score(X_test_scaled, y_test))
-
-
-
-# %%
 
 # %% [markdown]
 # ### Plotting acordding to age
@@ -350,3 +302,179 @@ for age_group in age_labels:
     
     plt.tight_layout()
     plt.show()
+
+# %%
+ordered_df2=ordered_df.copy()
+ordered_df_age = ordered_df2.merge(
+    filtered_participants[['subject_id', 'age']],
+    on='subject_id',
+    how='left'
+)
+ordered_df_age.head(2000)
+
+# %%
+ordered_df2 = ordered_df.drop(columns=['age'], errors='ignore')  # remove 'age' if it exists
+ordered_df_age = ordered_df2.merge(
+    filtered_participants[['subject_id', 'age','sex']],
+    on='subject_id',
+    how='left'
+)
+ordered_df_age.head(5000)
+
+# %%
+'''
+# 1. Drop unwanted columns
+df=ordered_df_age.copy()
+
+# 2. Average dki_fa per subject and tract (mean across nodes)
+fa_avg = df.groupby(['subject_id', 'tractID'])['dki_fa'].mean().reset_index()
+
+# 3. Pivot so each tract becomes a column, rows are subjects
+fa_wide = fa_avg.pivot(index='subject_id', columns='tractID', values='dki_fa')
+
+# Extract sex per subject (unique value)
+sex_df = df[['subject_id', 'sex','age']].drop_duplicates().set_index('subject_id')
+
+# Join sex to the fa_wide dataframe
+fa_wide = fa_wide.join(sex_df)
+
+# Now fa_wide has sex as an additional column
+fa_wide.head()
+'''
+
+# %%
+# 1. Drop unwanted columns
+df = ordered_df_age.copy()
+
+# 2. Average dki_fa per subject and tract (mean across nodes)
+fa_avg = df.groupby(['subject_id', 'tractID'])['dki_fa'].mean().reset_index()
+
+# 3. Pivot so each tract becomes a column, rows are subjects
+fa_wide = fa_avg.pivot(index='subject_id', columns='tractID', values='dki_fa')
+
+# Extract sex and age per subject (unique value)
+sex_df = df[['subject_id', 'sex', 'age']].drop_duplicates().set_index('subject_id')
+
+# Convert age to int before joining
+sex_df['age'] = sex_df['age'].astype(int)
+
+# Join sex and age to the fa_wide dataframe
+fa_wide = fa_wide.join(sex_df)
+
+# Now fa_wide has sex and age as additional columns
+fa_wide.head()
+
+# %%
+print(fa_wide.columns)
+
+# %% [markdown]
+# # Building a GLM model
+
+# %%
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.model_selection import train_test_split
+
+# Prepare features X and target y
+fa_wide=fa_wide.dropna()
+X = fa_wide.drop(columns=['age'])
+y = fa_wide['age'].astype(int)
+
+categorical_cols = ['sex']
+
+# One-hot encode categorical column 'sex'
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('cat', OneHotEncoder(drop='if_binary'), categorical_cols)
+    ],
+    remainder='passthrough'  # keep numeric columns as-is
+)
+
+
+# Create pipeline with preprocessing and LinearRegression
+model = Pipeline([
+    ('preprocessor', preprocessor),
+    ('regressor', LinearRegression())
+])
+
+# Split data into train/test sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Fit the model
+model.fit(X_train, y_train)
+
+# Evaluate on test set
+r2 = model.score(X_test, y_test)
+print(f'Test R^2 score: {r2:.3f}')
+
+
+# %%
+
+# %%
+
+# Predict ages for the test set
+y_pred = model.predict(X_test)
+
+# Scatter plot: actual vs predicted
+plt.figure(figsize=(6, 6))
+plt.scatter(y_test, y_pred, alpha=0.7)
+plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', linewidth=2)
+plt.xlabel('Actual Age')
+plt.ylabel('Predicted Age')
+plt.title('Actual vs. Predicted Age')
+plt.grid(True)
+plt.tight_layout()
+plt.show()
+
+# %% [markdown]
+# ### Adding regularization
+
+# %%
+import pandas as pd
+from sklearn.linear_model import Ridge, Lasso, ElasticNet
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import r2_score
+
+# Prepare data
+fa_wide = fa_wide.dropna()
+X = fa_wide.drop(columns=['age'])
+y = fa_wide['age'].astype(int)
+
+categorical_cols = ['sex']
+
+# Preprocessing: One-hot encode 'sex'
+preprocessor = ColumnTransformer(
+    transformers=[
+        ('cat', OneHotEncoder(drop='if_binary'), categorical_cols)
+    ],
+    remainder='passthrough'
+)
+
+# Define models to test
+models = {
+    'Ridge': Ridge(alpha=1.0),
+    'Lasso': Lasso(alpha=0.1),
+    'ElasticNet': ElasticNet(alpha=0.1, l1_ratio=0.5)
+}
+
+# Train/test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Train and evaluate each model
+for name, regressor in models.items():
+    model = Pipeline([
+        ('preprocessor', preprocessor),
+        ('regressor', regressor)
+    ])
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    r2 = r2_score(y_test, y_pred)
+    print(f'{name} R² score: {r2:.3f}')
+
+# %%
