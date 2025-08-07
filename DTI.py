@@ -101,19 +101,6 @@ list((hbn_pod2_path/'afq/sub-NDARZU279XR3').iterdir())
 filtered_participants['subject_id']
 
 # %%
-'''
-subject_id='sub-NDARAC331VEH'
-scan_site='CBIC'
-path_ = hbn_base_path_preproc / "data" / "Projects" / "HBN" / "BIDS_curated" / "derivatives" / "afq" / f"{subject_id}" / f"ses-HBNsite{scan_site}" / f"{subject_id}_ses-HBNsite{scan_site}_acq-64dir_space-T1w_desc-preproc_dwi_space-RASMM_model-CSD_desc-prob-afq_profiles.csv"
-
-
-profile = pd.read_csv(path_)
-
-profile.head()
-
-'''
-
-# %%
 filtered_participants['scan_site_id'].unique()
 
 # %% jupyter={"outputs_hidden": true}
@@ -140,32 +127,6 @@ for _, row in filtered_participants.iterrows():
         
         
 
-
-# %%
-'''
-for _, row in filtered_participants.iterrows():
-    subject_id = row['subject_id']  # or the correct column name
-    scan_site = row['scan_site_id']
-
-    
-    # Build path to tract_profiles file
-    file_path = (
-        hbn_pod2_path / "afq" / f"sub-{subject_id}" / f"ses-HBNsite{scan_site}" /
-        f"sub-{subject_id}_ses-HBNsite{scan_site}_acq-64dir_space-T1w_desc-preproc_dwi_space-RASMM_model-CSD_desc-prob-afq_profiles.csv"
-    )
-
-    if file_path.exists():
-        df_profile = pd.read_csv(file_path)
-        df_profile['subject_id'] = subject_id  # tag it for reference
-        tract_profiles_list.append(df_profile)
-    else:
-        print(f"File not found: {file_path}")
-
-'''
-
-
-
-# %%
 
 # %%
 
@@ -206,7 +167,11 @@ profile.head()
 # Save
 #tract_profiles_list.to_csv("tract_profiles_list.csv", index=False)
 
+# %% [markdown]
+# # Loading filtered data from CSV
+
 # %% jupyter={"outputs_hidden": true}
+import pandas as pd
 all_tract_profiles = pd.read_csv("all_tract_profiles.csv")
 groups=all_tract_profiles[all_tract_profiles['subject_id']=='sub-NDARAA947ZG5'].groupby('tractID')
 for tractID, df in groups:
@@ -225,6 +190,15 @@ print(f"Number of filtered subjects (ages 10-25) with complete data: {num_subjec
 
 # %% [markdown]
 # ### Plotting 5 tracts of 5 first subjects
+
+# %%
+ordered_df = (
+    all_tract_profiles
+    .groupby(['subject_id', 'tractID'], sort=False)
+    .apply(lambda x: x)
+    .reset_index(drop=True)
+)
+ordered_df.head(150)
 
 # %%
 import matplotlib.pyplot as plt
@@ -250,11 +224,13 @@ for i, subject in enumerate(first_5_subjects):
 plt.tight_layout(rect=[0, 0, 1, 0.96])
 plt.show()
 
+# %%
+
 # %% [markdown]
 # # Building a GLM model
 
 # %%
-'''
+
 from sklearn.linear_model import ElasticNetCV
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -262,7 +238,7 @@ import pandas as pd
 import numpy as np
 
 
-for key, df_group in group_by_sub:
+for key, df_group in ordered_df:
     df= df_group.copy()  # copy of just this group's DataFrame
   
 # 24 tract columns, 'age' column and 'sex' column
@@ -291,21 +267,20 @@ print("Best alpha:", model.alpha_)
 print("Best l1_ratio:", model.l1_ratio_)
 print("Train R^2:", model.score(X_train_scaled, y_train))
 print("Test R^2:", model.score(X_test_scaled, y_test))
-'''
+
 
 
 # %%
-df.head()
 
 # %% [markdown]
 # ### Plotting acordding to age
 
-# %% jupyter={"outputs_hidden": true}
-'''
+# %%
+
 import matplotlib.pyplot as plt
 
 # First 5 tracts to plot
-tracts_to_plot = sorted(all_tract_profiles['tractID'].unique())[:5]
+tracts_to_plot = sorted(ordered_df['tractID'].unique())[:5]
 
 # Get all ages to loop over (sorted)
 filtered_participants2 = filtered_participants.copy()
@@ -317,9 +292,9 @@ for age in ages:
     subjects_at_age = filtered_participants2.loc[filtered_participants2['age_int'] == age, 'subject_id']
 
     # Filter tract_profiles for these subjects and the chosen tracts
-    subset = all_tract_profiles[
-        (all_tract_profiles['subject_id'].isin(subjects_at_age)) &
-        (all_tract_profiles['tractID'].isin(tracts_to_plot))
+    subset = ordered_df[
+        (ordered_df['subject_id'].isin(subjects_at_age)) &
+        (ordered_df['tractID'].isin(tracts_to_plot))
     ]
 
     if subset.empty:
@@ -348,12 +323,393 @@ for age in ages:
 
     plt.tight_layout()
     plt.show()
-'''
+
 
 # %%
-ages
+
+# Define your age bins and labels
+age_bins = [10, 13, 16, 19, 23]  # 23 is exclusive upper limit
+age_labels = ['10-12', '13-15', '16-18', '19-22']
+
+# Merge age data if it's in a separate DataFrame
+all_tract_profiles = all_tract_profiles.merge(filtered_participants[['subject_id', 'age']], on='subject_id')
+
+# Add age group column
+all_tract_profiles['age_group'] = pd.cut(all_tract_profiles['age'], bins=age_bins, labels=age_labels, right=False)
+
 
 # %%
-print(all_tract_profiles.columns)
+#tracts_to_plot = ['ATR_R', 'CST_L', 'SLF_R']  # replace with your actual choices
+
+# %%
+
+import matplotlib.pyplot as plt
+
+for age_group in age_labels:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    # Filter by age group
+    age_group_df = all_tract_profiles[all_tract_profiles['age_group'] == age_group]
+    
+    # Loop over each tract
+    for tract in tracts_to_plot:
+        tract_df = age_group_df[age_group_df['tractID'] == tract]
+        
+        # Loop over each subject in that tract
+        for subject in tract_df['subject_id'].unique():
+            subject_data = tract_df[tract_df['subject_id'] == subject]
+            ax.plot(subject_data['nodeID'], subject_data['dki_fa'], alpha=0.3, label=f'{tract} - {subject}')
+        
+    ax.set_title(f'Tract profiles (dki_fa) for age group {age_group}')
+    ax.set_xlabel('Node ID')
+    ax.set_ylabel('DKI FA')
+   # ax.legend(loc='upper right', fontsize='small', ncol=2, frameon=False)
+    plt.tight_layout()
+    plt.show()
+
+
+# %%
+import matplotlib.pyplot as plt
+
+# Define age bins and labels
+age_bins = [10, 13, 16, 19, 23]
+age_labels = ['10-12', '13-15', '16-18', '19-22']
+
+# Merge age into tract data if not already there
+all_tract_profiles = all_tract_profiles.merge(
+    filtered_participants[['subject_id', 'age']],
+    on='subject_id'
+)
+all_tract_profiles['age_group'] = pd.cut(
+    all_tract_profiles['age'], bins=age_bins, labels=age_labels, right=False
+)
+
+# Define tracts to plot
+tracts_to_plot = ['ATR_R', 'CST_L', 'SLF_R']  # replace as needed
+
+# Plotting
+for age_group in age_labels:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    for tract in tracts_to_plot:
+        # Filter by age group and tract
+        data = all_tract_profiles[
+            (all_tract_profiles['age_group'] == age_group) &
+            (all_tract_profiles['tractID'] == tract)
+        ]
+        
+        # Pivot for mean/std by node
+        mean_std = data.groupby('nodeID')['dki_fa'].agg(['mean', 'std']).reset_index()
+        
+        # Plot mean line
+        ax.plot(
+            mean_std['nodeID'],
+            mean_std['mean'],
+            linewidth=2.5,
+            label=f'{tract} (mean)'
+        )
+        
+        # Plot shaded std region
+        ax.fill_between(
+            mean_std['nodeID'],
+            mean_std['mean'] - mean_std['std'],
+            mean_std['mean'] + mean_std['std'],
+            alpha=0.3
+        )
+    
+    ax.set_title(f'FA Tract Profiles (Age {age_group})')
+    ax.set_xlabel('Node ID')
+    ax.set_ylabel('FA')
+    ax.grid(True)
+    # Remove legend
+    ax.legend().remove()
+    plt.tight_layout()
+    plt.show()
+
+# %%
+import matplotlib.pyplot as plt
+import numpy as np
+
+# First 5 tracts to plot
+tracts_to_plot = sorted(all_tract_profiles['tractID'].unique())[:5]
+
+# Get all ages to loop over (sorted)
+filtered_participants2['age_int'] = filtered_participants2['age'].astype(int)
+ages = sorted(filtered_participants2['age_int'].unique())
+
+for tract in tracts_to_plot:
+    plt.figure(figsize=(10, 6))
+    
+    for age in ages:
+        # Get subject IDs of this age
+        subject_ids = filtered_participants2.loc[filtered_participants2['age_int'] == age, 'subject_id']
+        
+        # Get the profiles of those subjects for this tract
+        subset = all_tract_profiles[(all_tract_profiles['tractID'] == tract) & 
+                                    (all_tract_profiles['subject_id'].isin(subject_ids))]
+
+        if subset.empty:
+            continue
+        
+        # Pivot so each subject's profile is a row
+        pivot = subset.pivot(index='nodeID', columns='subject_id', values='dki_fa')
+        
+        # Calculate mean and std across subjects
+        mean_fa = pivot.mean(axis=1)
+        std_fa = pivot.std(axis=1)
+
+        # Plot with no legend
+        plt.fill_between(mean_fa.index, mean_fa - std_fa, mean_fa + std_fa, alpha=0.3, linewidth=0)
+        plt.plot(mean_fa.index, mean_fa, linewidth=2.5)
+
+    plt.title(f'Tract: {tract}')
+    plt.xlabel('Node')
+    plt.ylabel('FA')
+    plt.tight_layout()
+    plt.show()
+
+# %%
+import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+
+# Merge profiles and participant info
+merged = all_tract_profiles.merge(
+    filtered_participants[['subject_id', 'age']],
+    on='subject_id',
+    how='inner'
+)
+
+# Create age bins (e.g., 5-year bins)
+bin_size = 5
+merged['age_bin'] = pd.cut(
+    merged['age'],
+    bins=np.arange(merged['age'].min(), merged['age'].max() + bin_size, bin_size),
+    right=False,
+    include_lowest=True
+)
+
+# Select 3 tracts to plot
+tracts_to_plot = sorted(merged['tractID'].unique())[:3]
+
+# Plot
+for tract in tracts_to_plot:
+    plt.figure(figsize=(8, 5))
+    for age_bin, group in merged[merged['tractID'] == tract].groupby('age_bin'):
+        mean_profile = group.groupby('nodeID')['value'].mean()
+        plt.plot(mean_profile.index, mean_profile.values, label=f'{age_bin}')
+    
+    plt.title(f'Tract {tract} Profile by Age Bin')
+    plt.xlabel('Node ID')
+    plt.ylabel('Mean Value')
+    plt.legend(title='Age Bin', bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.tight_layout()
+    plt.show()
+
+# %%
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Copy the participant data
+filtered_participants2 = filtered_participants.copy()
+filtered_participants2['age_int'] = filtered_participants2['age'].astype(int)
+
+# Get all unique age values, sorted
+ages = sorted(filtered_participants2['age_int'].unique())
+
+# Select first 5 tract IDs for plotting
+tracts_to_plot = sorted(all_tract_profiles['tractID'].unique())[:5]
+
+# Set up the plot
+fig, axs = plt.subplots(len(tracts_to_plot), 1, figsize=(12, 4 * len(tracts_to_plot)), sharex=True)
+
+for i, tract_id in enumerate(tracts_to_plot):
+    ax = axs[i]
+    
+    for age in ages:
+        # Get subject IDs of participants with this age
+        subjects = filtered_participants2.loc[filtered_participants2['age_int'] == age, 'subject_id']
+
+        # Filter FA profiles for those subjects and the current tract
+        data = all_tract_profiles[
+            (all_tract_profiles['subject_id'].isin(subjects)) &
+            (all_tract_profiles['tractID'] == tract_id)
+        ]
+        
+        if data.empty:
+            continue
+        
+        # Drop 'age_x' if it exists to avoid merge conflict
+        data = data.drop(columns=[col for col in data.columns if col.startswith('age_') or col == 'age_x'], errors='ignore')
+        
+        # Merge with participant data to get age info
+        data = data.merge(filtered_participants2[['subject_id', 'age']], on='subject_id', how='left')
+
+        # Compute mean FA per node
+        mean_fa_by_node = data.groupby('nodeID')['dki_fa'].mean()
+
+        # Plot
+        ax.plot(mean_fa_by_node.index, mean_fa_by_node.values, label=f'Age {age}')
+
+    ax.set_title(f'Tract {tract_id}')
+    ax.set_ylabel('Mean FA')
+    ax.legend(title='Age')
+
+plt.xlabel('Node ID')
+plt.tight_layout()
+plt.show()
+
+# %%
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Define age bins and labels
+age_bins = [10, 13, 16, 19, 23]
+age_labels = ['10-12', '13-15', '16-18', '19-22']
+
+# Remove duplicate age column if already merged before
+if 'age' in all_tract_profiles.columns:
+    all_tract_profiles = all_tract_profiles.drop(columns=['age'])
+
+# Merge age info from participants
+all_tract_profiles = all_tract_profiles.merge(
+    filtered_participants[['subject_id', 'age']],
+    on='subject_id',
+    how='left'
+)
+
+# Create age group bin column
+all_tract_profiles['age_group'] = pd.cut(
+    all_tract_profiles['age'],
+    bins=age_bins,
+    labels=age_labels,
+    right=False
+)
+
+# Define tracts to plot
+tracts_to_plot = ['ATR_R', 'CST_L', 'SLF_R']  # You can change or expand this list
+
+# Plotting loop
+for age_group in age_labels:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    for tract in tracts_to_plot:
+        # Filter data by age group and tract
+        data = all_tract_profiles[
+            (all_tract_profiles['age_group'] == age_group) &
+            (all_tract_profiles['tractID'] == tract)
+        ]
+
+        if data.empty:
+            continue
+        
+        # Group by node and compute mean and std
+        mean_std = data.groupby('nodeID')['dki_fa'].agg(['mean', 'std']).reset_index()
+
+        # Plot mean line
+        ax.plot(
+            mean_std['nodeID'],
+            mean_std['mean'],
+            linewidth=2.5,
+            label=f'{tract}'
+        )
+
+        # Plot std band (shaded)
+        ax.fill_between(
+            mean_std['nodeID'],
+            mean_std['mean'] - mean_std['std'],
+            mean_std['mean'] + mean_std['std'],
+            alpha=0.4
+        )
+    
+    # Title and axis settings
+    ax.set_title(f'dki_fa Tract Profiles (Age {age_group})')
+    ax.set_xlabel('Node ID')
+    ax.set_ylabel('dki_fa')
+    ax.grid(True)
+
+    # Remove legend (optional: keep if needed)
+    ax.legend().remove()
+
+    plt.tight_layout()
+    plt.show()
+
+# %%
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Define age bins and labels
+age_bins = [10, 13, 16, 19, 23]
+age_labels = ['10-12', '13-15', '16-18', '19-22']
+
+# Remove duplicate age column if already merged before
+if 'age' in all_tract_profiles.columns:
+    all_tract_profiles = all_tract_profiles.drop(columns=['age'])
+
+# Merge age info from participants
+all_tract_profiles = all_tract_profiles.merge(
+    filtered_participants[['subject_id', 'age']],
+    on='subject_id',
+    how='left'
+)
+
+# Create age group bin column
+all_tract_profiles['age_group'] = pd.cut(
+    all_tract_profiles['age'],
+    bins=age_bins,
+    labels=age_labels,
+    right=False
+)
+
+# Define tracts to plot
+tracts_to_plot = ['ATR_R', 'CST_L', 'SLF_R']  # You can change or expand this list
+
+# Plotting loop
+for age_group in age_labels:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    for tract in tracts_to_plot:
+        # Filter data by age group and tract
+        data = all_tract_profiles[
+            (all_tract_profiles['age_group'] == age_group) &
+            (all_tract_profiles['tractID'] == tract)
+        ]
+
+        if data.empty:
+            continue
+        
+        # Group by node and compute mean and std
+        mean_std = data.groupby('nodeID')['dki_fa'].agg(['mean', 'std']).reset_index()
+
+        # Plot mean line
+        ax.plot(
+            mean_std['nodeID'],
+            mean_std['mean'],
+            linewidth=2.5,
+            label=f'{tract}'
+        )
+
+        # Plot std band (shaded)
+        ax.fill_between(
+            mean_std['nodeID'],
+            mean_std['mean'] - mean_std['std'],
+            mean_std['mean'] + mean_std['std'],
+            alpha=0.4
+        )
+    
+    # Title and axis settings
+    ax.set_title(f'FA Tract Profiles (Age {age_group})')
+    ax.set_xlabel('Node ID')
+    ax.set_ylabel('FA')
+    ax.grid(True)
+    ax.legend(title='Tract')
+    ax.set_ylim(0.2, 0.6)
+    # Remove legend (optional: keep if needed)
+    #ax.legend().remove()
+    
+    plt.tight_layout()
+    plt.show()
+
+# %%
 
 # %%
