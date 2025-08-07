@@ -478,3 +478,77 @@ for name, regressor in models.items():
     print(f'{name} R² score: {r2:.3f}')
 
 # %%
+import matplotlib.pyplot as plt
+import pandas as pd
+
+# Define age bins and labels
+age_bins = [10, 13, 16, 19, 23]
+age_labels = ['10-12', '13-15', '16-18', '19-22']
+
+# Remove duplicate 'age' column if it exists
+if 'age' in all_tract_profiles.columns:
+    all_tract_profiles = all_tract_profiles.drop(columns=['age'])
+
+# Merge age info
+all_tract_profiles = all_tract_profiles.merge(
+    filtered_participants[['subject_id', 'age']],
+    on='subject_id',
+    how='left'
+)
+
+# Create age group bin column
+all_tract_profiles['age_group'] = pd.cut(
+    all_tract_profiles['age'],
+    bins=age_bins,
+    labels=age_labels,
+    right=False
+)
+
+# Choose 4 tracts to plot
+tracts_to_plot = ['ATR_R', 'CST_L', 'SLF_R', 'ARC_L']
+
+# Plotting loop — one figure per tract
+for tract in tracts_to_plot:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    
+    for age_group in age_labels:
+        # Filter data for current tract and age group
+        data = all_tract_profiles[
+            (all_tract_profiles['tractID'] == tract) &
+            (all_tract_profiles['age_group'] == age_group)
+        ]
+        
+        if data.empty:
+            continue
+        
+        # Group by node and compute mean & std
+        mean_std = data.groupby('nodeID')['dki_fa'].agg(['mean', 'std']).reset_index()
+        
+        # Plot mean line
+        ax.plot(
+            mean_std['nodeID'],
+            mean_std['mean'],
+            linewidth=2.5,
+            label=f'{age_group}'
+        )
+        
+        # Plot std band
+        ax.fill_between(
+            mean_std['nodeID'],
+            mean_std['mean'] - mean_std['std'],
+            mean_std['mean'] + mean_std['std'],
+            alpha=0.3
+        )
+    
+    # Figure formatting
+    ax.set_title(f'FA Profile — {tract}')
+    ax.set_xlabel('Node ID')
+    ax.set_ylabel('FA')
+    ax.set_ylim(0.2, 0.6)
+    ax.grid(True)
+    ax.legend(title='Age Group')
+    
+    plt.tight_layout()
+    plt.show()
+
+# %%
